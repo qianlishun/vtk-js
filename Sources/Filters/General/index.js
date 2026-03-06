@@ -17,6 +17,7 @@ import vtkOutlineFilter from './OutlineFilter';
 import vtkPaintFilter from './PaintFilter';
 import vtkScalarToRGBA from './ScalarToRGBA';
 import vtkShrinkPolyData from './ShrinkPolyData';
+import vtkSimpleGPUSmoothFilter from './SimpleGPUSmoothFilter';
 import vtkTransformPolyDataFilter from './TransformPolyDataFilter';
 import vtkTriangleFilter from './TriangleFilter';
 import vtkTubeFilter from './TubeFilter';
@@ -43,6 +44,7 @@ export default {
   vtkPaintFilter,
   vtkScalarToRGBA,
   vtkShrinkPolyData,
+  vtkSimpleGPUSmoothFilter,
   vtkTransformPolyDataFilter,
   vtkTriangleFilter,
   vtkTubeFilter,
