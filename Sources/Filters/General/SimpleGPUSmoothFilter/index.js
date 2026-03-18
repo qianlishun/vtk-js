@@ -114,13 +114,6 @@ function vtkSimpleGPUSmoothFilter(publicAPI, model) {
   // --- GPU 部分：执行计算 ---
   publicAPI.requestData = (inData, outData) => {
     const input = inData[0];
-    if (model.numberOfIterations === 0) {
-      outData[0] = input;
-      if (typeof model.onComplete === 'function') {
-        model.onComplete(input);
-      }
-      return;
-    }
 
     if (!input || model.isBusy) {
       return;

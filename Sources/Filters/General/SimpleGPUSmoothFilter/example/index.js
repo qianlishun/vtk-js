@@ -6,7 +6,7 @@ import '@kitware/vtk.js/Rendering/Profiles/Geometry';
 import vtkFullScreenRenderWindow from '@kitware/vtk.js/Rendering/Misc/FullScreenRenderWindow';
 import vtkActor from '@kitware/vtk.js/Rendering/Core/Actor';
 import vtkMapper from '@kitware/vtk.js/Rendering/Core/Mapper';
-import vtkWindowedSincPolyDataFilter from '@kitware/vtk.js/Filters/General/WindowedSincPolyDataFilter';
+// import vtkWindowedSincPolyDataFilter from '@kitware/vtk.js/Filters/General/WindowedSincPolyDataFilter';
 import vtkSimpleGPUSmoothFilter from '@kitware/vtk.js/Filters/General/SimpleGPUSmoothFilter';
 import vtkImageMarchingCubes from '@kitware/vtk.js/Filters/General/ImageMarchingCubes';
 import vtkImageData from '@kitware/vtk.js/Common/DataModel/ImageData';
