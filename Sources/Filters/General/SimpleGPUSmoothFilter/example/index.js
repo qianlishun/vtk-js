@@ -6,7 +6,7 @@ import '@kitware/vtk.js/Rendering/Profiles/Geometry';
 import vtkFullScreenRenderWindow from '@kitware/vtk.js/Rendering/Misc/FullScreenRenderWindow';
 import vtkActor from '@kitware/vtk.js/Rendering/Core/Actor';
 import vtkMapper from '@kitware/vtk.js/Rendering/Core/Mapper';
-// import vtkWindowedSincPolyDataFilter from '@kitware/vtk.js/Filters/General/WindowedSincPolyDataFilter';
+import vtkWindowedSincPolyDataFilter from '@kitware/vtk.js/Filters/General/WindowedSincPolyDataFilter';
 import vtkSimpleGPUSmoothFilter from '@kitware/vtk.js/Filters/General/SimpleGPUSmoothFilter';
 import vtkImageMarchingCubes from '@kitware/vtk.js/Filters/General/ImageMarchingCubes';
 import vtkImageData from '@kitware/vtk.js/Common/DataModel/ImageData';
@@ -121,10 +121,18 @@ const marchingCube = vtkImageMarchingCubes.newInstance({
 marchingCube.setInputData(originalImageData);
 
 const smoothFilter = vtkSimpleGPUSmoothFilter.newInstance({
-  numberOfIterations: 0,
-  passBand: 0.1,
+  numberOfIterations: 1,
+  // passBand: 0.3,
 });
 smoothFilter.setWebGPURenderWindow(apiRW);
+smoothFilter.setOnComplete((outputData) => {
+  console.log('smoothFilter setOnComplete');
+  renderWindow.render();
+});
+// const smoothFilter = vtkWindowedSincPolyDataFilter.newInstance({
+//   numberOfIterations: 0,
+//   passBand: 0.1,
+// });
 smoothFilter.setInputConnection(marchingCube.getOutputPort());
 
 const normalFilter = vtkPolyDataNormals.newInstance();
@@ -140,23 +148,32 @@ mapper.setInputConnection(normalFilter.getOutputPort());
 
 const gui = new GUI();
 const params = {
-  numberOfIterations: 0,
-  passBand: 0.1,
+  numberOfIterations: 5,
+  smoothingFactor: 0.2,
+  passBand: 0.3,
 };
 gui
   .add(params, 'numberOfIterations', 0, 100, 1)
   .name('Iterations')
   .onChange((v) => {
     smoothFilter.set({ numberOfIterations: Number(v) });
-    renderWindow.render();
+    smoothFilter.update();
   });
+
 gui
-  .add(params, 'passBand', 0.1, 1, 0.05)
-  .name('Pass band')
+  .add(params, 'passBand', 0.01, 1, 0.01)
+  .name('passBand')
   .onChange((v) => {
-    const value = 10.0 ** (-4.0 * Number(v));
-    smoothFilter.set({ passBand: value });
-    renderWindow.render();
+    smoothFilter.set({ passBand: v });
+    smoothFilter.update();
+  });
+
+gui
+  .add(params, 'smoothingFactor', 0.01, 1, 0.01)
+  .name('smoothingFactor')
+  .onChange((v) => {
+    smoothFilter.set({ smoothingFactor: v });
+    smoothFilter.update();
   });
 
 // -----------------------------------------------------------

@@ -116,28 +116,74 @@ function vtkSimpleGPUSmoothFilter(publicAPI, model) {
     const input = inData[0];
     if (model.numberOfIterations === 0) {
       outData[0] = input;
+      if (typeof model.onComplete === 'function') {
+        model.onComplete(input);
+      }
+      return;
+    }
+
+    if (!input || model.isBusy) {
       return;
     }
     model.device = model.webGPURenderWindow.getDevice();
     if (!model.device) {
+      outData[0] = input;
+      if (typeof model.onComplete === 'function') {
+        model.onComplete(input);
+      }
+      setTimeout(() => {
+        publicAPI.requestData(inData, outData);
+      }, 300);
       return;
     }
-    if (!input || model.isBusy) {
-      return;
-    }
+
     const runCompute = async () => {
       try {
         console.time('SimpleGPUSmoothFilter');
 
         model.isBusy = true;
-        // Windowed Sinc 系数计算 (基于 passBand)
-        // eslint-disable-next-line camelcase
-        const lambda = 0.33;
-        const theta = model.passBand || 0.1;
-        // 核心：防止分母接近 0
-        // eslint-disable-next-line prettier/prettier
-        const denominator = ( 1.0 / theta ) - ( 1.0 / lambda );
-        const mu = Math.abs(denominator) < 1e-6 ? -0.34 : -1.0 / denominator;
+
+        // Windowed Sinc 滤波器系数计算
+        // 基于 VTK 标准实现：https://vtk.org/doc/nightly/html/classvtkWindowedSincPolyDataFilter.html
+
+        const userSmoothingFactor = model.smoothingFactor ?? 0.5;
+        const safeSmoothingFactor = Math.max(
+          0.0,
+          Math.min(1.0, userSmoothingFactor)
+        );
+
+        // 如果用户显式设置了 passBand，则优先使用；否则从 smoothingFactor 计算
+        let passBand;
+        if (model.passBand !== null && model.passBand !== undefined) {
+          passBand = model.passBand;
+        } else {
+          // 反向映射：smoothingFactor 越大，passBand 越小（平滑越强）
+          // smoothingFactor: 0.0 → passBand: 1.0  (不平滑)
+          // smoothingFactor: 0.5 → passBand: 0.5  (中等平滑)
+          // smoothingFactor: 1.0 → passBand: 0.1  (强平滑)
+          // 使用简单的线性映射，符合直觉
+          const minPassBand = 0.1; // 最小 passBand（最强平滑）
+          const maxPassBand = 1.0; // 最大 passBand（最弱平滑）
+          passBand =
+            maxPassBand - safeSmoothingFactor * (maxPassBand - minPassBand);
+        }
+
+        // Lambda: 基于 passBand 计算平滑强度系数
+        // passBand 越小，lambda 越大，平滑效果越强
+        // 公式：lambda = 1 / (4 * passBand^2)
+        const epsilon = 0.01; // 防止分母过小
+        const lambda = 1.0 / (4.0 * passBand * passBand + epsilon);
+
+        // Mu: 归一化系数，确保数值稳定性
+        // mu = lambda / (1 + lambda)，范围始终在 [0, 1)
+        const mu = lambda / (1.0 + lambda);
+
+        // 边界检查：防止极端值导致的不稳定
+        const maxLambda = passBand < 0.3 ? 3.0 : 10.0; // 根据 passBand 动态调整上限
+        const safeLambda = Math.max(0.1, Math.min(maxLambda, lambda));
+        const safeMu = Math.max(0.0, Math.min(0.8, mu));
+
+        console.log('passBand', passBand, 'lambda=', lambda, 'safeMu=', safeMu);
 
         const points = input.getPoints().getData();
         const numPoints = input.getNumberOfPoints();
@@ -200,14 +246,14 @@ function vtkSimpleGPUSmoothFilter(publicAPI, model) {
           .queue.writeBuffer(
             bParamsLambda,
             0,
-            new Float32Array([lambda, numPoints, stride, 0])
+            new Float32Array([safeLambda, numPoints, stride, 0])
           );
         model.device
           .getHandle()
           .queue.writeBuffer(
             bParamsMu,
             0,
-            new Float32Array([mu, numPoints, stride, 0])
+            new Float32Array([safeMu, numPoints, stride, 0])
           );
 
         const bindGroupPing = model.device.getHandle().createBindGroup({
@@ -233,7 +279,7 @@ function vtkSimpleGPUSmoothFilter(publicAPI, model) {
 
         for (let i = 0; i < model.numberOfIterations; i++) {
           // 第一步：Lambda Pass (bPing -> bPong)
-          const encoder = model.device.getHandle().createCommandEncoder();
+          const encoder = model.device.createCommandEncoder();
 
           const pass1 = encoder.beginComputePass();
           pass1.setPipeline(model.pipeline);
@@ -248,10 +294,11 @@ function vtkSimpleGPUSmoothFilter(publicAPI, model) {
           pass2.dispatchWorkgroups(numGroups);
           pass2.end();
 
-          model.device.getHandle().queue.submit([encoder.finish()]);
+          model.device.submitCommandEncoder(encoder);
+          // model.device.getHandle().queue.submit([encoder.finish()]);
         }
 
-        await model.device.getHandle().queue.onSubmittedWorkDone();
+        await model.device.onSubmittedWorkDone();
 
         // 读取结果并更新 PolyData
         const readBuffer = model.device.getHandle().createBuffer({
@@ -259,7 +306,7 @@ function vtkSimpleGPUSmoothFilter(publicAPI, model) {
           // eslint-disable-next-line no-bitwise, no-undef
           usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
         });
-        const readEncoder = model.device.getHandle().createCommandEncoder();
+        const readEncoder = model.device.createCommandEncoder();
         readEncoder.copyBufferToBuffer(
           bPing,
           0,
@@ -267,7 +314,8 @@ function vtkSimpleGPUSmoothFilter(publicAPI, model) {
           0,
           points.byteLength
         );
-        model.device.getHandle().queue.submit([readEncoder.finish()]);
+        // model.device.getHandle().queue.submit([readEncoder.finish()]);
+        model.device.submitCommandEncoder(readEncoder);
 
         // eslint-disable-next-line no-undef
         await readBuffer.mapAsync(GPUMapMode.READ);
@@ -283,8 +331,12 @@ function vtkSimpleGPUSmoothFilter(publicAPI, model) {
         output.getPoints().setData(finalPoints);
 
         outData[0] = output;
-
         console.timeEnd('SimpleGPUSmoothFilter');
+
+        // 调用完成回调
+        if (typeof model.onComplete === 'function') {
+          model.onComplete(output);
+        }
       } finally {
         model.isBusy = false;
       }
@@ -295,9 +347,11 @@ function vtkSimpleGPUSmoothFilter(publicAPI, model) {
 
 const DEFAULT_VALUES = {
   numberOfIterations: 20,
-  passBand: 0.1,
+  smoothingFactor: 0.2, // 0~1 范围，用户友好的平滑系数
+  passBand: null,
   device: null,
   webGPURenderWindow: null,
+  onComplete: null,
 };
 
 export function extend(publicAPI, model, initialValues = {}) {
@@ -306,9 +360,11 @@ export function extend(publicAPI, model, initialValues = {}) {
   macro.algo(publicAPI, model, 1, 1);
   macro.setGet(publicAPI, model, [
     'numberOfIterations',
+    'smoothingFactor',
     'passBand',
     'webGPURenderWindow',
     'device',
+    'onComplete',
   ]);
   vtkSimpleGPUSmoothFilter(publicAPI, model);
 }
